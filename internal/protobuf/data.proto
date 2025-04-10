@@ -1,0 +1,8 @@
+package data;
+
+option go_package = "github.com/EnderCHX/Distributed-Simulation-Management-System-go/internal/protobuf";
+
+message data {
+  required string option = 1;
+  optional bytes data = 2;
+}

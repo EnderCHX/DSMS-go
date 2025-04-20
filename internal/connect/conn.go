@@ -15,52 +15,48 @@ const (
 )
 
 type Conn struct {
-	conn   net.Conn
+	conn   *net.Conn
 	closed atomic.Bool
 }
 
-type connWriter struct {
+type ConnWriter struct {
 	conn    *Conn
-	started bool
-	sent    atomic.Int64
+	started atomic.Bool
 }
 
-func (c *connWriter) Write(p []byte) (n int, err error) {
+func (c *ConnWriter) Write(p []byte) (n int, err error) {
 	//没有发送开始符号则发送
-	if !c.started {
-		_, err = c.conn.conn.Write([]byte{dataStart})
+	if !c.started.Load() {
+		_, err = (*c.conn.conn).Write([]byte{dataStart})
 		if err != nil {
 			return 0, err
 		}
-		c.started = true
-		c.sent.Add(1)
+		c.started.Store(true)
+	} else {
+		//发送数据（续）
+		_, err = (*c.conn.conn).Write([]byte{dataContinue})
+		if err != nil {
+			return 0, err
+		}
 	}
-
-	//发送数据（续）
-	_, err = c.conn.conn.Write([]byte{dataContinue})
-	if err != nil {
-		return 0, err
-	}
-	c.sent.Add(1)
 
 	dataLenBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(dataLenBuf, uint32(len(p)))
-	_, err = c.conn.conn.Write(dataLenBuf)
+	_, err = (*c.conn.conn).Write(dataLenBuf)
 	if err != nil {
 		return 0, err
 	}
-	c.sent.Add(4)
-	_, err = c.conn.conn.Write(p)
+	_, err = (*c.conn.conn).Write(p)
 	if err != nil {
 		return 0, err
 	}
-	c.sent.Add(int64(len(p)))
-	n = int(c.sent.Load())
+
+	n = len(p)
 	return
 }
 
-func (c *connWriter) Close() error {
-	_, err := c.conn.conn.Write([]byte{dataEnd})
+func (c *ConnWriter) Close() error {
+	_, err := (*c.conn.conn).Write([]byte{dataEnd})
 	return err
 }
 
@@ -68,25 +64,24 @@ func (c *Conn) Send() (io.WriteCloser, error) {
 	if c.closed.Load() {
 		return nil, io.ErrClosedPipe
 	}
-	return &connWriter{
+	return &ConnWriter{
 		conn:    c,
-		started: false,
-		sent:    atomic.Int64{},
+		started: atomic.Bool{},
 	}, nil
 }
 
-type connReader struct {
+type ConnReader struct {
 	conn   *Conn
 	eof    atomic.Bool
 	buffer []byte
 }
 
-func (c *connReader) Read(p []byte) (n int, err error) {
+func (c *ConnReader) Read(p []byte) (n int, err error) {
 	if c.eof.Load() {
 		return 0, io.EOF
 	}
 	buf := make([]byte, 1)
-	_, err = io.ReadFull(c.conn.conn, buf)
+	_, err = io.ReadFull((*c.conn.conn), buf)
 	if err != nil {
 		return 0, err
 	}
@@ -100,7 +95,7 @@ func (c *connReader) Read(p []byte) (n int, err error) {
 	}
 
 	lenBuf := make([]byte, 4)
-	_, err = io.ReadFull(c.conn.conn, lenBuf)
+	_, err = io.ReadFull((*c.conn.conn), lenBuf)
 	if err != nil {
 		return 0, err
 	}
@@ -108,7 +103,7 @@ func (c *connReader) Read(p []byte) (n int, err error) {
 
 	if dataLen > 0 {
 		c.buffer = make([]byte, dataLen)
-		_, err = io.ReadFull(c.conn.conn, c.buffer)
+		_, err = io.ReadFull((*c.conn.conn), c.buffer)
 		if err != nil {
 			return 0, err
 		}
@@ -120,20 +115,26 @@ func (c *Conn) Receive() (io.Reader, error) {
 	if c.closed.Load() {
 		return nil, io.ErrClosedPipe
 	}
-	return &connReader{
+	reader := &ConnReader{
 		conn:   c,
 		eof:    atomic.Bool{},
 		buffer: []byte{},
-	}, nil
+	}
+	reader.eof.Store(false)
+	return reader, nil
 }
 
 func (c *Conn) Close() {
 	if c.closed.CompareAndSwap(false, true) {
-		c.conn.Close()
+		(*c.conn).Close()
 	}
 }
 
-func NewConn(conn net.Conn) *Conn {
+func (c *Conn) RemoteAddr() net.Addr {
+	return (*c.conn).RemoteAddr()
+}
+
+func NewConn(conn *net.Conn) *Conn {
 	return &Conn{
 		conn:   conn,
 		closed: atomic.Bool{},

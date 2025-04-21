@@ -130,6 +130,10 @@ func (c *Conn) Close() {
 	}
 }
 
+func (c *Conn) IsClosed() bool {
+	return c.closed.Load()
+}
+
 func (c *Conn) RemoteAddr() net.Addr {
 	return (*c.conn).RemoteAddr()
 }

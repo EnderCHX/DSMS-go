@@ -346,6 +346,13 @@ func (h *Hub) handleMsg(msg Msg, c *client) {
 		}
 		msg_, _ := json.Marshal(msg)
 		for client := range h.subscribers[data.Event] {
+			if client.closed {
+				logger.Debug(fmt.Sprintf("%v -> client closed", client.conn.RemoteAddr()))
+				client.mtx.Lock()
+				delete(h.subscribers[data.Event], client)
+				client.mtx.Unlock()
+				continue
+			}
 			client.send <- msg_
 		}
 	case "pong":

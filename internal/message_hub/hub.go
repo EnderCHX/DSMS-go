@@ -21,9 +21,17 @@ var globMsg = make(chan struct {
 var clientCloseNotify = make(chan *client, 16)
 
 var logger *zap.Logger
+var loggerInited = false
+var mtx = sync.Mutex{}
 
 func InitLogger() {
+	mtx.Lock()
+	if loggerInited {
+		return
+	}
 	logger = log.NewLogger("[MESSAGE_HUB]", "logs/message_hub.log", "debug")
+	loggerInited = true
+	defer mtx.Unlock()
 }
 
 type Hub struct {
@@ -34,6 +42,7 @@ type Hub struct {
 
 func NewHub(addr, port string) *Hub {
 	listener, err := net.Listen("tcp", addr+":"+port)
+	InitLogger()
 	if err != nil {
 		logger.Error(err.Error())
 		return nil

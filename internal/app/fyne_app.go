@@ -46,7 +46,7 @@ func Run() {
 
 	inputServerPort := widget.NewEntry()
 	inputServerPort.SetPlaceHolder("输入服务器端口")
-	inputServerPort.SetText("8080")
+	inputServerPort.SetText("1314")
 
 	inputPublish := widget.NewEntry()
 	inputPublish.SetPlaceHolder("发布事件")

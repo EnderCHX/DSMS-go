@@ -5,4 +5,5 @@ const (
 )
 
 type SimulationMgr struct {
+	eventChan chan string
 }

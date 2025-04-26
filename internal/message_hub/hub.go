@@ -153,6 +153,7 @@ func (c *client) Read() {
 					return
 				}
 				logger.Error(err.Error())
+				return
 			}
 
 			globMsg <- struct {

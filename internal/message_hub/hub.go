@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/EnderCHX/DSMS-go/internal/connect"
+	auth "github.com/EnderCHX/DSMS-go/utils/jwt"
 	"github.com/EnderCHX/DSMS-go/utils/log"
 	"go.uber.org/zap"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"time"
 )
@@ -96,15 +98,17 @@ func (h *Hub) Run() {
 }
 
 type client struct {
-	conn   *connect.Conn
-	reader io.Reader
-	writer io.WriteCloser
-	send   chan []byte
-	pong   chan struct{}
-	ctx    context.Context
-	close  context.CancelFunc
-	closed bool
-	mtx    sync.Mutex
+	username string
+	login    bool
+	conn     *connect.Conn
+	reader   io.Reader
+	writer   io.WriteCloser
+	send     chan []byte
+	pong     chan struct{}
+	ctx      context.Context
+	close    context.CancelFunc
+	closed   bool
+	mtx      sync.Mutex
 }
 
 func newClient(conn *net.Conn) *client {
@@ -140,12 +144,12 @@ func (c *client) Read() {
 		}
 		defer c.Close()
 	}()
+	buf := make([]byte, 1024)
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		default:
-			buf := make([]byte, 1024)
 			n, err := c.reader.Read(buf)
 			if err != nil {
 				if err.Error() == "EOF" {
@@ -191,8 +195,10 @@ func (c *client) HeartBeat() {
 		}
 		defer c.Close()
 	}()
+	logintimeout := 50 * time.Second
 	heartbeatTime := 30 * time.Second
 	timeout := 40 * time.Second
+	loginTicker := time.NewTicker(logintimeout)
 	heartTicker := time.NewTicker(heartbeatTime)
 	timeoutTicker := time.NewTicker(timeout)
 	for {
@@ -213,6 +219,22 @@ func (c *client) HeartBeat() {
 			c.Close()
 			logger.Debug(fmt.Sprintf("%v -> timeout, remove", c.conn.RemoteAddr()))
 			return
+		case <-loginTicker.C:
+			if c.login {
+				loginTicker.Stop()
+			} else {
+				c.send <- func() []byte {
+					msg_, _ := json.Marshal(&Msg{
+						Option: "error",
+						Data:   json.RawMessage(`{"msg":"login timeout, please login"}`),
+					})
+					return msg_
+				}()
+				clientCloseNotify <- c
+				c.Close()
+				logger.Debug(fmt.Sprintf("%v -> login timeout, remove", c.conn.RemoteAddr()))
+				return
+			}
 		}
 	}
 }
@@ -314,6 +336,9 @@ type Msg struct {
 func (h *Hub) handleMsg(msg Msg, c *client) {
 	switch msg.Option {
 	case "subscribe":
+		if !c.login {
+			return
+		}
 		type Data struct {
 			Event string `json:"event"`
 		}
@@ -329,6 +354,9 @@ func (h *Hub) handleMsg(msg Msg, c *client) {
 		}
 		h.subscribers[data.Event][c] = struct{}{}
 	case "unsubscribe":
+		if !c.login {
+			return
+		}
 		type Data struct {
 			Event string `json:"event"`
 		}
@@ -345,15 +373,22 @@ func (h *Hub) handleMsg(msg Msg, c *client) {
 		}
 		delete(h.subscribers[data.Event], c)
 	case "publish":
+		if !c.login {
+			return
+		}
 		type Data struct {
-			Event string          `json:"event"`
-			Data  json.RawMessage `json:"data"`
+			Event    string          `json:"event"`
+			Data     json.RawMessage `json:"data"`
+			FromUser string          `json:"from_user"`
 		}
 		var data Data
 		json.Unmarshal(msg.Data, &data)
 		if data.Event == "" {
 			return
 		}
+		data.FromUser = c.username
+		data_, _ := json.Marshal(data)
+		msg.Data = data_
 		msg_, _ := json.Marshal(msg)
 		for client := range h.subscribers[data.Event] {
 			if client.closed {
@@ -363,10 +398,66 @@ func (h *Hub) handleMsg(msg Msg, c *client) {
 				client.mtx.Unlock()
 				continue
 			}
+			if !client.login {
+				continue
+			}
 			client.send <- msg_
 		}
 	case "pong":
 		c.pong <- struct{}{}
+	case "login":
+		type Data struct {
+			AccessToken string `json:"access_token"`
+		}
+		var data Data
+		json.Unmarshal(msg.Data, &data)
+		if data.AccessToken == "" {
+			c.send <- func() []byte {
+				msg_, _ := json.Marshal(&Msg{
+					Option: "error",
+					Data:   json.RawMessage(`{"error":"access token is empty"}`),
+				})
+				return msg_
+			}()
+			return
+		} else {
+			logger.Debug(os.Getenv("ACCESS_SECRET"))
+			payload, err := auth.VerifyToken(data.AccessToken, os.Getenv("ACCESS_SECRET"))
+			if err != nil {
+				c.send <- func() []byte {
+					msg_, _ := json.Marshal(&Msg{
+						Option: "error",
+						Data:   json.RawMessage(`{"error":"access token is invalid"}`),
+					})
+					return msg_
+				}()
+				return
+			} else {
+				c.mtx.Lock()
+				defer c.mtx.Unlock()
+				if c.login {
+					c.send <- func() []byte {
+						msg_, _ := json.Marshal(&Msg{
+							Option: "error",
+							Data:   json.RawMessage(`{"error":"already login"}`),
+						})
+						return msg_
+					}()
+					return
+				} else {
+					c.login = true
+					c.username = payload.Username
+					c.send <- func() []byte {
+						msg_, _ := json.Marshal(&Msg{
+							Option: "info",
+							Data:   json.RawMessage(`{"info":"login success"}`),
+						})
+						return msg_
+					}()
+					return
+				}
+			}
+		}
 	default:
 		logger.Error(fmt.Sprintf("%v -> unknown option: %v", c.conn.RemoteAddr(), msg.Option))
 		c.send <- func() []byte {

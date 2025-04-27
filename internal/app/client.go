@@ -10,6 +10,7 @@ import (
 	"github.com/EnderCHX/DSMS-go/utils/log"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -19,14 +20,19 @@ var logger = log.NewLogger("[Client]", "logs/client.log", "debug")
 var fileFS embed.FS
 
 var (
-	client *connect.Conn
-	writer io.WriteCloser
-	reader io.Reader
-	send   = make(chan []byte)
-	recv   = make(chan []byte)
-	ctx    context.Context
-	cancel context.CancelFunc
+	client    *connect.Conn
+	writer    io.WriteCloser
+	reader    io.Reader
+	send      = make(chan []byte)
+	recv      = make(chan []byte)
+	ctx       context.Context
+	cancel    context.CancelFunc
+	timestamp atomic.Uint64
 )
+
+func init() {
+	timestamp.Store(0)
+}
 
 func connectServer(ip, port string) error {
 	conn, err := net.Dial("tcp", ip+":"+port)

@@ -110,6 +110,18 @@ func Run() {
 				return
 			}
 			w.SetContent(connectedContent)
+			send <- func() []byte {
+				msg_, _ := json.Marshal(&Msg{
+					Option: "login",
+					Data: func() json.RawMessage {
+						data, _ := json.Marshal(map[string]string{
+							"access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3QiLCJyb2xlIjoiVVNFUiIsImF2YXRhciI6IiIsInNpZ25hdHVyZSI6IiIsImlzcyI6ImNoeGMuY2MiLCJleHAiOjE3NDU3NTAwODMsImlhdCI6MTc0NTc0NjQ4M30.XTqXcj1rJ22bPW-Z2InX7Vrt1bEgWdHU68g6YWtOz5E",
+						})
+						return data
+					}(),
+				})
+				return msg_
+			}()
 		}),
 		list,
 	)

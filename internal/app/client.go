@@ -10,6 +10,7 @@ import (
 	"github.com/EnderCHX/DSMS-go/utils/log"
 	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -28,10 +29,12 @@ var (
 	ctx       context.Context
 	cancel    context.CancelFunc
 	timestamp atomic.Uint64
+	mtx       sync.Mutex
 )
 
 func init() {
 	timestamp.Store(0)
+	ctx, cancel = context.WithCancel(context.Background())
 }
 
 func connectServer(ip, port string) error {

@@ -1,20 +1,28 @@
 package app
 
 import (
-	"github.com/EnderCHX/DSMS-go/utils/log"
 	"github.com/gin-gonic/gin"
+	"time"
 )
 
-func RunGin(ip, port string) {
-	logger := log.NewLogger("[Client]", "logs/client.go", "debug")
-	r := gin.New()
-	r.Use(gin.Recovery(), log.GinZapLogger(logger))
+var value int
 
-	r.LoadHTMLGlob("resources/html/**/*")
+func RunGin(ip, port string) {
+	//logger := log.NewLogger("[Client]", "logs/client.go", "debug")
+	r := gin.Default()
 
 	r.GET("/", func(c *gin.Context) {
-
+		c.HTML(200, "index.html", gin.H{
+			"value": value,
+		})
 	})
+
+	go func() {
+		for {
+			time.Sleep(time.Second * 1)
+			value++
+		}
+	}()
 
 	r.Run(ip + ":" + port)
 }

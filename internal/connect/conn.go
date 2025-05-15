@@ -4,128 +4,346 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
+	"sync"
 	"sync/atomic"
+	"time"
 )
+
+/*
+
+数据包格式：
+|开始标记|控制标记|消息id|数据长度|数据|继续标识|数据长度|数据|结束标记|
+控制标记:1字节，|0|0|0|是否为ping包|ping包0为pong1为ping|是否需要应答ack|是否为ack包0否1是|是否分段|
+ping包: |0x01|00010000|0x03| pong包: |0x01|00011000|0x03|
+ack包: |0x01|00000010|应答消息id|0x03|
+需要应答的分段的数据包: |0x01|00000101|消息id|数据长度|数据|继续标识|数据长度|数据|0x03|
+*/
 
 const (
 	dataStart    byte = 0x01
 	dataContinue byte = 0x02
 	dataEnd      byte = 0x03
+
+	ctrlSeg     byte = 0b00000001
+	ctrlIfPing  byte = 0b00010000
+	ctrlPing    byte = 0b00001000
+	ctrlNeedAck byte = 0b00000100
+	ctrlIfAck   byte = 0b00000010
 )
 
 type Conn struct {
 	conn   *net.Conn
 	closed atomic.Bool
+	ackMap sync.Map
+	mtx    sync.Mutex
 }
 
-type ConnWriter struct {
-	conn    *Conn
-	started atomic.Bool
-}
+func (c *Conn) sendData(data []byte, needAck bool, waitAck bool, ackMessageId uint32) error {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	if c.closed.Load() {
+		return io.ErrClosedPipe
+	}
 
-func (c *ConnWriter) Write(p []byte) (n int, err error) {
-	//没有发送开始符号则发送
-	if !c.started.Load() {
-		_, err = (*c.conn.conn).Write([]byte{dataStart})
-		if err != nil {
-			return 0, err
-		}
-		c.started.Store(true)
+	needSegment := false
+
+	segment := len(data)/((1<<17)-1) + 1
+
+	if segment > 1 {
+		needSegment = true
+	}
+
+	_, err := (*c.conn).Write([]byte{dataStart})
+	if err != nil {
+		return err
+	}
+
+	var controlData byte
+	controlData = 0b00000000
+
+	if needAck {
+		controlData |= 0b00000100
+	}
+	if needSegment {
+		controlData |= 0b00000001
+	}
+	_, err = (*c.conn).Write([]byte{controlData})
+	if err != nil {
+		return err
+	}
+
+	var messageId uint32
+
+	if waitAck {
+		messageId = ackMessageId
 	} else {
-		//发送数据（续）
-		_, err = (*c.conn.conn).Write([]byte{dataContinue})
+		messageId = uint32(time.Now().UnixNano() + rand.Int63())
+	}
+	messageIdBuf := make([]byte, 4)
+	binary.BigEndian.PutUint32(messageIdBuf, messageId)
+	_, err = (*c.conn).Write(messageIdBuf)
+	if err != nil {
+		return err
+	}
+
+	if segment <= 1 {
+		dataLen := len(data)
+		dataLenBuf := make([]byte, 2)
+		binary.BigEndian.PutUint16(dataLenBuf, uint16(dataLen))
+		_, err = (*c.conn).Write(dataLenBuf)
 		if err != nil {
-			return 0, err
+			return err
+		}
+
+		_, err = (*c.conn).Write(data)
+		if err != nil {
+			return err
+		}
+
+		_, err = (*c.conn).Write([]byte{dataEnd})
+		return err
+	}
+
+	for i := 0; i < segment; i++ {
+		dataLen := ((1 << 17) - 1)
+		dataLenBuf := make([]byte, 2)
+		binary.BigEndian.PutUint16(dataLenBuf, uint16(dataLen))
+		_, err = (*c.conn).Write(dataLenBuf)
+		if err != nil {
+			return err
+		}
+		_, err = (*c.conn).Write(data[i*((1<<17)-1) : (i+1)*((1<<17)-1)])
+		if err != nil {
+			return err
+		}
+
+		if i == segment-1 {
+			if needAck && !waitAck {
+				go func() {
+					for i := 0; i < 3; i++ {
+						time.Sleep(10 * time.Second)
+						if _, ok := c.ackMap.Load(messageId); ok {
+							c.ackMap.Delete(messageId)
+							break
+						} else {
+							c.sendData(data, true, true, messageId)
+						}
+					}
+				}()
+			}
+			_, err = (*c.conn).Write([]byte{dataEnd})
+			return err
+		} else {
+			_, err = (*c.conn).Write([]byte{dataContinue})
+			if err != nil {
+				return err
+			}
 		}
 	}
-
-	dataLenBuf := make([]byte, 4)
-	binary.BigEndian.PutUint32(dataLenBuf, uint32(len(p)))
-	_, err = (*c.conn.conn).Write(dataLenBuf)
-	if err != nil {
-		return 0, err
-	}
-	_, err = (*c.conn.conn).Write(p)
-	if err != nil {
-		return 0, err
-	}
-
-	n = len(p)
-	return
+	return fmt.Errorf("invalid data start")
 }
 
-func (c *ConnWriter) Close() error {
-	_, err := (*c.conn.conn).Write([]byte{dataEnd})
+func (c *Conn) sendAck(messageId uint32) error {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	if c.closed.Load() {
+		return io.ErrClosedPipe
+	}
+
+	_, err := (*c.conn).Write([]byte{dataStart})
+	if err != nil {
+		return err
+	}
+	_, err = (*c.conn).Write([]byte{ctrlIfAck})
+	if err != nil {
+		return err
+	}
+	messageIdBuf := make([]byte, 4)
+	binary.BigEndian.PutUint32(messageIdBuf, messageId)
+	_, err = (*c.conn).Write(messageIdBuf)
+	if err != nil {
+		return err
+	}
+	_, err = (*c.conn).Write([]byte{dataEnd})
 	return err
 }
 
-func (c *Conn) Send() (io.WriteCloser, error) {
+func (c *Conn) sendPing() error {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
 	if c.closed.Load() {
-		return nil, io.ErrClosedPipe
+		return io.ErrClosedPipe
 	}
-	return &ConnWriter{
-		conn:    c,
-		started: atomic.Bool{},
-	}, nil
+
+	_, err := (*c.conn).Write([]byte{dataStart})
+	if err != nil {
+		return err
+	}
+	ctrlData := ctrlIfPing | ctrlPing
+	_, err = (*c.conn).Write([]byte{ctrlData})
+	if err != nil {
+		return err
+	}
+	_, err = (*c.conn).Write([]byte{dataEnd})
+	return err
 }
 
-type ConnReader struct {
-	conn   *Conn
-	eof    atomic.Bool
-	buffer []byte
+func (c *Conn) sendPong() error {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	if c.closed.Load() {
+		return io.ErrClosedPipe
+	}
+
+	_, err := (*c.conn).Write([]byte{dataStart})
+	if err != nil {
+		return err
+	}
+	ctrlData := ctrlIfPing
+	_, err = (*c.conn).Write([]byte{ctrlData})
+	if err != nil {
+		return err
+	}
+	_, err = (*c.conn).Write([]byte{dataEnd})
+	return err
 }
 
-func (c *ConnReader) Read(p []byte) (n int, err error) {
-	if c.eof.Load() {
-		return 0, io.EOF
-	}
-	buf := make([]byte, 1)
-	_, err = io.ReadFull((*c.conn.conn), buf)
+// 接收数据包 return 数据
+// 数据类型int
+// 1 普通消息
+// 2 ping包
+// 3 pong包
+// 4 ack应答
+func (c *Conn) receiveData() ([]byte, int, error) {
+	var data []byte
+
+	startBuf := make([]byte, 1)
+	_, err := io.ReadFull((*c.conn), startBuf)
 	if err != nil {
-		return 0, err
-	}
-	if buf[0] != dataStart && buf[0] != dataContinue && buf[0] != dataEnd {
-		return 0, fmt.Errorf("invalid data start")
+		return nil, 0, err
 	}
 
-	if buf[0] == dataEnd {
-		c.eof.Store(true)
-		return 0, io.EOF
+	if startBuf[0] != dataStart {
+		return nil, 0, fmt.Errorf("invalid data start")
 	}
 
-	lenBuf := make([]byte, 4)
-	_, err = io.ReadFull((*c.conn.conn), lenBuf)
+	ctrlBuf := make([]byte, 1)
+	_, err = io.ReadFull((*c.conn), ctrlBuf)
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
-	dataLen := binary.BigEndian.Uint32(lenBuf)
 
-	if dataLen > 0 {
-		c.buffer = make([]byte, dataLen)
-		_, err = io.ReadFull((*c.conn.conn), c.buffer)
-		if err != nil {
-			return 0, err
+	ctrlData := ctrlBuf[0]
+
+	if ctrlData&ctrlIfPing == 1 {
+		if ctrlData&ctrlPing == 1 {
+			err := c.sendPong()
+			if err != nil {
+				return nil, 2, err
+			}
+			endBuf := make([]byte, 1)
+			_, err = io.ReadFull((*c.conn), endBuf)
+			return nil, 2, err
+		} else {
+			endBuf := make([]byte, 1)
+			_, err = io.ReadFull((*c.conn), endBuf)
+			return nil, 3, err
 		}
 	}
-	return copy(p, c.buffer), nil
+
+	messageIdBuf := make([]byte, 4)
+	if ctrlData&ctrlIfAck == 1 {
+		_, err = io.ReadFull((*c.conn), messageIdBuf)
+		if err != nil {
+			return nil, 4, err
+		}
+		messageId := binary.BigEndian.Uint32(messageIdBuf)
+		endBuf := make([]byte, 1)
+		_, err = io.ReadFull((*c.conn), endBuf)
+		c.ackMap.Store(messageId, struct{}{})
+		return messageIdBuf, 4, err
+	}
+
+	needAck := ctrlData&ctrlNeedAck == 1
+	_, err = io.ReadFull((*c.conn), messageIdBuf)
+	if err != nil {
+		return nil, 0, err
+	}
+	messageId := binary.BigEndian.Uint32(messageIdBuf)
+	needSegment := ctrlData&ctrlSeg == 1
+
+	for {
+		if needSegment {
+			dataLenBuf := make([]byte, 2)
+			_, err := io.ReadFull((*c.conn), dataLenBuf)
+			if err != nil {
+				return nil, 1, err
+			}
+			dataLen := binary.BigEndian.Uint16(dataLenBuf)
+			dataT := make([]byte, dataLen)
+			_, err = io.ReadFull((*c.conn), dataT)
+			if err != nil {
+				return nil, 1, err
+			}
+			data = append(data, dataT...)
+		} else {
+			dataLenBuf := make([]byte, 2)
+			_, err := io.ReadFull((*c.conn), dataLenBuf)
+			if err != nil {
+				return nil, 1, err
+			}
+			dataLen := binary.BigEndian.Uint16(dataLenBuf)
+			data = make([]byte, dataLen)
+			_, err = io.ReadFull((*c.conn), data)
+			if err != nil {
+				return nil, 1, err
+			}
+		}
+		buf := make([]byte, 1)
+		_, err := io.ReadFull((*c.conn), buf)
+		if err != nil {
+			return nil, 1, err
+		}
+		if buf[0] == dataEnd {
+			if needAck {
+				err := c.sendAck(messageId)
+				if err != nil {
+					return nil, 1, err
+				}
+			}
+			return data, 1, nil
+		} else if buf[0] == dataContinue {
+			continue
+		} else if buf[0] == dataStart {
+			return nil, 1, fmt.Errorf("invalid data start")
+		} else {
+			return nil, 1, fmt.Errorf("invalid data end")
+		}
+	}
 }
 
-func (c *Conn) Receive() (io.Reader, error) {
-	if c.closed.Load() {
-		return nil, io.ErrClosedPipe
-	}
-	reader := &ConnReader{
-		conn:   c,
-		eof:    atomic.Bool{},
-		buffer: []byte{},
-	}
-	reader.eof.Store(false)
-	return reader, nil
+func (c *Conn) Send(data []byte, needAck bool) error {
+	return c.sendData(data, needAck, false, 0)
+}
+
+func (c *Conn) Ping() error {
+	return c.sendPing()
+}
+
+func (c *Conn) Pong() error {
+	return c.sendPong()
+}
+
+func (c *Conn) Receive() (data []byte, type_ int, err error) {
+	data, type_, err = c.receiveData()
+	return
 }
 
 func (c *Conn) Close() {
 	if c.closed.CompareAndSwap(false, true) {
+		(*c.conn).Write([]byte{dataEnd})
 		(*c.conn).Close()
 	}
 }
@@ -142,5 +360,7 @@ func NewConn(conn *net.Conn) *Conn {
 	return &Conn{
 		conn:   conn,
 		closed: atomic.Bool{},
+		ackMap: sync.Map{},
+		mtx:    sync.Mutex{},
 	}
 }

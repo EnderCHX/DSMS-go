@@ -1,7 +1,7 @@
 package main
 
-import "github.com/EnderCHX/DSMS-go/internal/simulation_mgr"
+import "github.com/EnderCHX/DSMS-go/internal/simulation_center"
 
 func main() {
-	simulation_mgr.Run()
+	simulation_center.Run()
 }

@@ -6,7 +6,9 @@ import (
 	fyneApp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	"github.com/EnderCHX/DSMS-go/internal/auth"
 )
 
 var messageList = binding.NewBytesList()
@@ -33,7 +35,6 @@ func Run() {
 	w.SetIcon(fyne.NewStaticResource("bronya", icon))
 	w.Resize(fyne.NewSize(800, 0))
 	w.SetCloseIntercept(func() {
-		writer.Close()
 		client.Close()
 		a.Quit()
 	})
@@ -98,10 +99,17 @@ func Run() {
 		inputContent,
 		list,
 	)
+	inputUsername := widget.NewEntry()
+	inputUsername.SetPlaceHolder("输入用户名")
+	inputPassword := widget.NewEntry()
+	inputPassword.SetPlaceHolder("输入密码")
+	inputPassword.Password = true
 
 	connContent := container.NewVBox(
 		inputServerIp,
 		inputServerPort,
+		inputUsername,
+		inputPassword,
 		widget.NewButton("连接", func() {
 			logger.Info("连接到: " + inputServerIp.Text + ":" + inputServerPort.Text)
 			err := connectServer(inputServerIp.Text, inputServerPort.Text)
@@ -111,11 +119,19 @@ func Run() {
 			}
 			w.SetContent(connectedContent)
 			send <- func() []byte {
+				username := inputUsername.Text
+				password := inputPassword.Text
+				_, access_token, err := auth.Login(username, password)
+				if err != nil {
+					logger.Error("登录错误: " + err.Error())
+					dialog.NewInformation("登录错误", err.Error(), w)
+					return []byte{}
+				}
 				msg_, _ := json.Marshal(&Msg{
 					Option: "login",
 					Data: func() json.RawMessage {
 						data, _ := json.Marshal(map[string]string{
-							"access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6InRlc3QiLCJyb2xlIjoiVVNFUiIsImF2YXRhciI6IiIsInNpZ25hdHVyZSI6IiIsImlzcyI6ImNoeGMuY2MiLCJleHAiOjE3NDU3NTAwODMsImlhdCI6MTc0NTc0NjQ4M30.XTqXcj1rJ22bPW-Z2InX7Vrt1bEgWdHU68g6YWtOz5E",
+							"access_token": access_token,
 						})
 						return data
 					}(),

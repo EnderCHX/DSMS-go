@@ -22,8 +22,6 @@ var fileFS embed.FS
 
 var (
 	client    *connect.Conn
-	writer    io.WriteCloser
-	reader    io.Reader
 	send      = make(chan []byte)
 	recv      = make(chan []byte)
 	ctx       context.Context
@@ -45,15 +43,6 @@ func connectServer(ip, port string) error {
 
 	client = connect.NewConn(&conn)
 
-	writer, err = client.Send()
-	if err != nil {
-		return err
-	}
-
-	reader, err = client.Receive()
-	if err != nil {
-		return err
-	}
 	go read()
 	go write()
 	go handleMsg()
@@ -62,18 +51,23 @@ func connectServer(ip, port string) error {
 
 func read() {
 	for {
-		buf := make([]byte, 1024)
-		n, err := reader.Read(buf)
+		data, type_, err := client.Receive()
+
 		if err != nil {
-			if err.Error() == "EOF" {
-				fmt.Println("Server closed")
+			if err == io.EOF {
+				logger.Error("Server closed")
+				return
+			} else {
+				logger.Error("Read error: " + err.Error())
 				return
 			}
-			logger.Error("Read error: " + err.Error())
-			return
 		}
-		logger.Debug(string(buf[:n]))
-		recv <- buf[:n]
+		if type_ != 1 {
+			continue
+		}
+
+		logger.Debug(string(data))
+		recv <- data
 	}
 }
 
@@ -81,7 +75,7 @@ func write() {
 	for {
 		msg := <-send
 		logger.Debug(string(msg))
-		_, err := writer.Write(msg)
+		err := client.Send(msg, false)
 		if err != nil {
 			logger.Error("Write error: " + err.Error())
 			return

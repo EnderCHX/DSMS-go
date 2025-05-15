@@ -101,8 +101,6 @@ type client struct {
 	username string
 	login    bool
 	conn     *connect.Conn
-	reader   io.Reader
-	writer   io.WriteCloser
 	send     chan []byte
 	pong     chan struct{}
 	ctx      context.Context
@@ -113,21 +111,10 @@ type client struct {
 
 func newClient(conn *net.Conn) *client {
 	con := connect.NewConn(conn)
-	writer, err := con.Receive()
-	if err != nil {
-		logger.Error(err.Error())
-		return nil
-	}
-	reader, err := con.Send()
-	if err != nil {
-		logger.Error(err.Error())
-		return nil
-	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	return &client{
 		conn:   con,
-		reader: writer,
-		writer: reader,
 		send:   make(chan []byte),
 		ctx:    ctx,
 		close:  cancel,
@@ -144,27 +131,32 @@ func (c *client) Read() {
 		}
 		defer c.Close()
 	}()
-	buf := make([]byte, 1024)
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		default:
-			n, err := c.reader.Read(buf)
+			data, type_, err := c.conn.Receive()
 			if err != nil {
-				if err.Error() == "EOF" {
+				if err == io.EOF {
+					logger.Debug(fmt.Sprintf("%v -> disconnected", c.conn.RemoteAddr()))
 					c.Close()
 					return
 				}
-				logger.Error(err.Error())
+				logger.Error(fmt.Sprintf("%v -> read error: %v", c.conn.RemoteAddr(), err))
+				c.Close()
 				return
+			}
+
+			if type_ != 1 {
+				continue
 			}
 
 			globMsg <- struct {
 				data []byte
 				c    *client
 			}{
-				data: buf[:n],
+				data: data,
 				c:    c,
 			}
 		}
@@ -181,7 +173,7 @@ func (c *client) Write() {
 	for {
 		select {
 		case msg := <-c.send:
-			c.writer.Write(msg)
+			c.conn.Send(msg, true)
 		case <-c.ctx.Done():
 			return
 		}
@@ -421,7 +413,6 @@ func (h *Hub) handleMsg(msg Msg, c *client) {
 			}()
 			return
 		} else {
-			logger.Debug(os.Getenv("ACCESS_SECRET"))
 			payload, err := auth.VerifyToken(data.AccessToken, os.Getenv("ACCESS_SECRET"))
 			if err != nil {
 				c.send <- func() []byte {

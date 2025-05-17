@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"fyne.io/fyne/v2"
-	"github.com/EnderCHX/DSMS-go/internal/connect"
+	"github.com/EnderCHX/DSMS-go/internal/dstp"
 	"github.com/EnderCHX/DSMS-go/utils/log"
 	"io"
 	"net"
@@ -21,7 +21,7 @@ var logger = log.NewLogger("[Client]", "logs/client.log", "debug")
 var fileFS embed.FS
 
 var (
-	client    *connect.Conn
+	client    *dstp.Conn
 	send      = make(chan []byte)
 	recv      = make(chan []byte)
 	ctx       context.Context
@@ -41,7 +41,7 @@ func connectServer(ip, port string) error {
 		return err
 	}
 
-	client = connect.NewConn(&conn)
+	client = dstp.NewConn(&conn)
 
 	go read()
 	go write()

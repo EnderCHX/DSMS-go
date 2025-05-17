@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/EnderCHX/DSMS-go/internal/connect"
+	"github.com/EnderCHX/DSMS-go/internal/dstp"
 	auth "github.com/EnderCHX/DSMS-go/utils/jwt"
 	"github.com/EnderCHX/DSMS-go/utils/log"
 	"go.uber.org/zap"
@@ -100,7 +100,7 @@ func (h *Hub) Run() {
 type client struct {
 	username string
 	login    bool
-	conn     *connect.Conn
+	conn     *dstp.Conn
 	send     chan []byte
 	pong     chan struct{}
 	ctx      context.Context
@@ -110,7 +110,7 @@ type client struct {
 }
 
 func newClient(conn *net.Conn) *client {
-	con := connect.NewConn(conn)
+	con := dstp.NewConn(conn)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &client{

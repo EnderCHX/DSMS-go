@@ -1,4 +1,4 @@
-package connect
+package dstp
 
 import (
 	"encoding/binary"
@@ -12,7 +12,8 @@ import (
 )
 
 /*
-
+分布式仿真传输协议
+Distributed Simulation Transport Protocol (DSTP)
 数据包格式：
 |开始标记|控制标记|消息id|数据长度|数据|继续标识|数据长度|数据|结束标记|
 控制标记:1字节，|0|0|0|是否为ping包|ping包0为pong1为ping|是否需要应答ack|是否为ack包0否1是|是否分段|

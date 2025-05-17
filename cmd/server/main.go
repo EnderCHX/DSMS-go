@@ -10,7 +10,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	hub := message_hub.NewHub("0.0.0.0", "8080")
+	hub := message_hub.NewHub("0.0.0.0", "1314")
 	hub.Run()
 
 	select {}

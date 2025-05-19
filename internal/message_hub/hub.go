@@ -31,13 +31,13 @@ func InitLogger() {
 	if loggerInited {
 		return
 	}
-	logger = log.NewLogger("[MESSAGE_HUB]", "logs/message_hub.log", "debug")
+	logger = log.NewLogger("[MESSAGE_HUB]", "log/message_hub.log", "debug")
 	loggerInited = true
 	defer mtx.Unlock()
 }
 
 type Hub struct {
-	subscribers map[string]map[*client]struct{} // 订阅者 key: event, value: clients set
+	subscribers map[string]map[*client]struct{} // 订阅者 key: channel, value: clients set
 	mtx         sync.Mutex
 	server      *server
 }
@@ -332,61 +332,61 @@ func (h *Hub) handleMsg(msg Msg, c *client) {
 			return
 		}
 		type Data struct {
-			Event string `json:"event"`
+			Channel string `json:"channel"`
 		}
 		var data Data
 		json.Unmarshal(msg.Data, &data)
-		if data.Event == "" {
+		if data.Channel == "" {
 			return
 		}
 		h.mtx.Lock()
 		defer h.mtx.Unlock()
-		if _, ok := h.subscribers[data.Event]; !ok {
-			h.subscribers[data.Event] = make(map[*client]struct{})
+		if _, ok := h.subscribers[data.Channel]; !ok {
+			h.subscribers[data.Channel] = make(map[*client]struct{})
 		}
-		h.subscribers[data.Event][c] = struct{}{}
+		h.subscribers[data.Channel][c] = struct{}{}
 	case "unsubscribe":
 		if !c.login {
 			return
 		}
 		type Data struct {
-			Event string `json:"event"`
+			Channel string `json:"channel"`
 		}
 		var data Data
 		json.Unmarshal(msg.Data, &data)
 
-		if data.Event == "" {
+		if data.Channel == "" {
 			return
 		}
 		h.mtx.Lock()
 		defer h.mtx.Unlock()
-		if _, ok := h.subscribers[data.Event]; !ok {
+		if _, ok := h.subscribers[data.Channel]; !ok {
 			return
 		}
-		delete(h.subscribers[data.Event], c)
+		delete(h.subscribers[data.Channel], c)
 	case "publish":
 		if !c.login {
 			return
 		}
 		type Data struct {
-			Event    string          `json:"event"`
+			Channel  string          `json:"channel"`
 			Data     json.RawMessage `json:"data"`
 			FromUser string          `json:"from_user"`
 		}
 		var data Data
 		json.Unmarshal(msg.Data, &data)
-		if data.Event == "" {
+		if data.Channel == "" {
 			return
 		}
 		data.FromUser = c.username
 		data_, _ := json.Marshal(data)
 		msg.Data = data_
 		msg_, _ := json.Marshal(msg)
-		for client := range h.subscribers[data.Event] {
+		for client := range h.subscribers[data.Channel] {
 			if client.closed {
 				logger.Debug(fmt.Sprintf("%v -> client closed", client.conn.RemoteAddr()))
 				client.mtx.Lock()
-				delete(h.subscribers[data.Event], client)
+				delete(h.subscribers[data.Channel], client)
 				client.mtx.Unlock()
 				continue
 			}

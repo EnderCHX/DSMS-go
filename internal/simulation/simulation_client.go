@@ -6,6 +6,9 @@ import (
 	"fyne.io/fyne/v2"
 	app2 "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/data/binding"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/EnderCHX/DSMS-go/utils/log"
 	"github.com/bytedance/sonic"
@@ -13,10 +16,13 @@ import (
 	"go.uber.org/zap"
 	"image/color"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
 var clientUsername string
+var clientStepLen float64 = 0.5
 
 func RunClient() {
 	pid := fmt.Sprintf("%v", os.Getpid())
@@ -47,6 +53,45 @@ func RunClient() {
 		PlaceHolder: "密码",
 		Password:    true,
 	}
+
+	clientStepLenInput := &widget.Entry{
+		Text:        fmt.Sprintf("%v", clientStepLen),
+		PlaceHolder: "每次移动距离",
+		Validator: func(s string) error {
+			_, err := strconv.ParseFloat(s, 64)
+			return err
+		},
+	}
+
+	vectorClockList := widget.NewListWithData(
+		vectorClockBinding,
+		func() fyne.CanvasObject {
+			return widget.NewLabel("template")
+		},
+		func(i binding.DataItem, o fyne.CanvasObject) {
+			o.(*widget.Label).Bind(i.(binding.String))
+		},
+	)
+	chatInput := &widget.Entry{
+		Text:        "",
+		PlaceHolder: "消息",
+		MultiLine:   true,
+	}
+	chatList := widget.NewListWithData(
+		chatListBinding,
+		func() fyne.CanvasObject {
+			return widget.NewEntry()
+		},
+		func(i binding.DataItem, o fyne.CanvasObject) {
+			text, _ := i.(binding.String).Get()
+			spit := strings.Split(text, "\n")
+			spitNum := len(spit)
+			o.(*widget.Entry).MultiLine = true
+			o.(*widget.Entry).SetMinRowsVisible(spitNum)
+			o.(*widget.Entry).Disable()
+			o.(*widget.Entry).Bind(i.(binding.String))
+		},
+	)
 
 	connectContainer = container.NewVBox(
 		container.NewGridWithRows(1,
@@ -84,7 +129,7 @@ func RunClient() {
 				msg, _ := sonic.Marshal(map[string]any{
 					"option": "publish",
 					"data": map[string]any{
-						"event": "simulation/join",
+						"channel": "simulation/join",
 						"data": map[string]any{
 							"vector_clock": vectorClockToMap(&vectorClock),
 						},
@@ -98,7 +143,7 @@ func RunClient() {
 				msg, _ = sonic.Marshal(map[string]any{
 					"option": "publish",
 					"data": map[string]any{
-						"event": "simulation/client/" + clientUsername,
+						"channel": "simulation/client/" + clientUsername,
 						"data": map[string]any{
 							"vector_clock": vectorClockToMap(&vectorClock),
 							"point": map[string]any{
@@ -114,7 +159,7 @@ func RunClient() {
 				msg, _ = sonic.Marshal(map[string]any{
 					"option": "subscribe",
 					"data": map[string]any{
-						"event": "simulation/setting/tick",
+						"channel": "simulation/setting/tick",
 						"data": map[string]any{
 							"vector_clock": vectorClockToMap(&vectorClock),
 						},
@@ -126,7 +171,7 @@ func RunClient() {
 				msg, _ = sonic.Marshal(map[string]any{
 					"option": "subscribe",
 					"data": map[string]any{
-						"event": "simulation/setting/point",
+						"channel": "simulation/setting/point",
 						"data": map[string]any{
 							"vector_clock": vectorClockToMap(&vectorClock),
 						},
@@ -138,7 +183,19 @@ func RunClient() {
 				msg, _ = sonic.Marshal(map[string]any{
 					"option": "subscribe",
 					"data": map[string]any{
-						"event": "simulation/setting/remove_point",
+						"channel": "simulation/setting/remove_point",
+						"data": map[string]any{
+							"vector_clock": vectorClockToMap(&vectorClock),
+						},
+					},
+				})
+				dstpConn.Send(msg, false)
+
+				vectorClockAdd(clientUsername)
+				msg, _ = sonic.Marshal(map[string]any{
+					"option": "subscribe",
+					"data": map[string]any{
+						"channel": "simulation/chat",
 						"data": map[string]any{
 							"vector_clock": vectorClockToMap(&vectorClock),
 						},
@@ -156,16 +213,64 @@ func RunClient() {
 		},
 	)
 
-	mainContainer = container.NewGridWithColumns(1,
+	mainContainer = container.NewGridWithColumns(2,
 		bigMap,
 		container.NewVBox(
+			container.New(
+				layout.NewFormLayout(),
+				&widget.Label{
+					Text: "当前节点数量:",
+				},
+				widget.NewLabelWithData(clientsCount),
+				&widget.Label{
+					Text: "当前步长:",
+				},
+				widget.NewLabelWithData(tickBinding),
+				clientStepLenInput,
+				&widget.Button{
+					Text: "设置每次移动距离",
+					OnTapped: func() {
+						clientStepLen__, err := strconv.ParseFloat(clientStepLenInput.Text, 64)
+						if err != nil {
+							dialog.NewInformation("错误", "请输入数字", w).Show()
+							return
+						}
+						clientStepLen = clientStepLen__
+					},
+				},
+				chatInput,
+				&widget.Button{
+					Text: "发送",
+					OnTapped: func() {
+						if chatInput.Text == "" {
+							dialog.NewInformation("错误", "请输入内容", w).Show()
+							return
+						}
+
+						vectorClockAdd(clientUsername)
+						msg, _ := sonic.Marshal(map[string]any{
+							"option": "publish",
+							"data": map[string]any{
+								"channel": "simulation/chat",
+								"data": map[string]any{
+									"chat":         chatInput.Text,
+									"vector_clock": vectorClockToMap(&vectorClock),
+								},
+							},
+						})
+						dstpConn.Send(msg, false)
+
+						chatInput.SetText("")
+					},
+				},
+			),
 			&widget.Button{
 				Text: "退出",
 				OnTapped: func() {
 					msg, _ := sonic.Marshal(map[string]any{
 						"option": "publish",
 						"data": map[string]any{
-							"event": "simulation/quit",
+							"channel": "simulation/quit",
 						},
 					})
 					dstpConn.Send(msg, false)
@@ -184,35 +289,22 @@ func RunClient() {
 					ctx, cancel = context.WithCancel(context.Background())
 				},
 			},
-			container.NewGridWithRows(4,
-				&widget.Button{
-					Text: "上",
-					OnTapped: func() {
-						clientMove(0, -50)
-					},
-				},
-				&widget.Button{
-					Text: "下",
-					OnTapped: func() {
-						clientMove(0, 50)
-					},
-				},
-				&widget.Button{
-					Text: "左",
-					OnTapped: func() {
-						clientMove(-50, 0)
-					},
-				},
-				&widget.Button{
-					Text: "右",
-					OnTapped: func() {
-						clientMove(50, 0)
-					},
-				},
-			),
 		),
+		widget.NewCard("向量时间戳", "", vectorClockList),
+		widget.NewCard("消息记录", "", chatList),
 	)
 
+	w.Canvas().SetOnTypedKey(func(channel *fyne.KeyEvent) {
+		if channel.Name == fyne.KeyUp || channel.Name == fyne.KeyW {
+			clientMove(0, -clientStepLen)
+		} else if channel.Name == fyne.KeyDown || channel.Name == fyne.KeyS {
+			clientMove(0, clientStepLen)
+		} else if channel.Name == fyne.KeyLeft || channel.Name == fyne.KeyA {
+			clientMove(-clientStepLen, 0)
+		} else if channel.Name == fyne.KeyRight || channel.Name == fyne.KeyD {
+			clientMove(clientStepLen, 0)
+		}
+	})
 	w.SetContent(connectContainer)
 	w.ShowAndRun()
 }
@@ -226,7 +318,7 @@ func clientStep() {
 			msg, _ := sonic.Marshal(map[string]any{
 				"option": "publish",
 				"data": map[string]any{
-					"event": "simulation/client/" + clientUsername,
+					"channel": "simulation/client/" + clientUsername,
 					"data": map[string]any{
 						"vector_clock": vectorClockToMap(&vectorClock),
 						"point": map[string]any{
@@ -251,6 +343,7 @@ func clientStep() {
 					})
 					return list
 				}())
+				tickBinding.Set(fmt.Sprintf("%d tick/s", tick))
 			})
 		case <-ctx.Done():
 			return
@@ -288,13 +381,13 @@ func handleMsgClient() {
 			logger.Debug(string(data_))
 
 			data, _ := sonic.Get(data_, "data")
-			event, _ := data.Get("event").String()
-			go handleEventClient(event, data)
+			channel, _ := data.Get("channel").String()
+			go handleEventClient(channel, data)
 		}
 	}
 }
 
-func handleEventClient(event string, data ast.Node) {
+func handleEventClient(channel string, data ast.Node) {
 	recVC, _ := data.Get("data").Get("vector_clock").MarshalJSON()
 	recVectorClock := make(map[string]uint64)
 	sonic.Unmarshal(recVC, &recVectorClock)
@@ -309,7 +402,12 @@ func handleEventClient(event string, data ast.Node) {
 		}
 	}
 
-	switch event {
+	switch channel {
+	case "simulation/chat":
+		from_user, _ := data.Get("from_user").String()
+		chat, _ := data.Get("data").Get("chat").String()
+		date := time.Now().Format("[2006-01-02 15:04:05]")
+		chatListBinding.Append(fmt.Sprintf("%s%s: %s", date, from_user, chat))
 	case "simulation/setting/tick":
 		tick_, _ := data.Get("data").Get("tick").Int64()
 		fmt.Println(tick_)
@@ -332,7 +430,7 @@ func handleEventClient(event string, data ast.Node) {
 				B: uint8(point_color_b),
 				A: 255,
 			},
-			Radius:   3,
+			Radius:   5,
 			Username: point_username,
 		}
 		clientsPoint.Store(point_username, point)
@@ -344,7 +442,7 @@ func handleEventClient(event string, data ast.Node) {
 		clientsSet.Delete(point_name)
 		vectorClockAdd(clientUsername)
 	default:
-		logger.Warn("unknown event", zap.String("event", event))
+		logger.Warn("unknown channel", zap.String("channel", channel))
 	}
 }
 
@@ -354,7 +452,7 @@ func clientMove(move_x, move_y float64) {
 	msg, _ := sonic.Marshal(map[string]any{
 		"option": "publish",
 		"data": map[string]any{
-			"event": "simulation/client/" + clientUsername,
+			"channel": "simulation/client/" + clientUsername,
 			"data": map[string]any{
 				"vector_clock": vectorClockToMap(&vectorClock),
 				"point": map[string]any{

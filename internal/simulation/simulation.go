@@ -28,6 +28,7 @@ var (
 	dstpConn           *dstp.Conn
 	vectorClock                      = sync.Map{}
 	tick               time.Duration = 20
+	tickBinding                      = binding.NewString()
 	ticker                           = time.NewTicker(time.Millisecond * (1000 / tick))
 	bigMap                           = NewCoordinateWidget()
 	logger             *zap.Logger
@@ -35,6 +36,7 @@ var (
 	clientsSet         = sync.Map{}
 	clientsCount       = binding.NewString()
 	vectorClockBinding = binding.NewStringList()
+	chatListBinding    = binding.NewStringList()
 	ctx, cancel        = context.WithCancel(context.Background())
 )
 
@@ -121,7 +123,7 @@ func (cw *CoordinateWidget) draw(w, h int) image.Image {
 			p.Color = color.Black
 		}
 		if p.Radius == 0 {
-			p.Radius = 3
+			p.Radius = 5
 		}
 		drawCircle(img, int(screenX), int(screenY), int(p.Radius), p.Color)
 		drawText(img, int(screenX-2*cw.scale), int(screenY-2*cw.scale), p.Username, p.Color)
@@ -340,4 +342,25 @@ func vectorIsConcurrent(v1, v2 map[string]uint64) bool {
 	} else {
 		return false
 	}
+}
+
+type ControlPad struct {
+	widget.BaseWidget
+	pointUsername string
+	OnKeyDown     func(key *fyne.KeyEvent)
+	OnKeyUp       func(key *fyne.KeyEvent)
+}
+
+func (c *ControlPad) FocusGained() {
+}
+
+func (c *ControlPad) FocusLost() {
+}
+
+func (c *ControlPad) TypedRune(r rune) {
+
+}
+
+func (c *ControlPad) TypedKey(event *fyne.KeyEvent) {
+
 }

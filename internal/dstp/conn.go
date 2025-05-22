@@ -238,8 +238,8 @@ func (c *Conn) receiveData() ([]byte, int, error) {
 
 	ctrlData := ctrlBuf[0]
 
-	if ctrlData&ctrlIfPing == 1 {
-		if ctrlData&ctrlPing == 1 {
+	if ctrlData&ctrlIfPing == ctrlIfPing {
+		if ctrlData&ctrlPing == ctrlPing {
 			err := c.sendPong()
 			if err != nil {
 				return nil, 2, err

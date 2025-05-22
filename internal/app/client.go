@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-var logger = log.NewLogger("[Client]", "logs/client.log", "debug")
+var logger = log.NewLogger("[Client]", "log/client.log", "debug")
 
 //go:embed resources
 var fileFS embed.FS

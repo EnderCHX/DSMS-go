@@ -121,7 +121,7 @@ func RunCenter() {
 						msg, _ := sonic.Marshal(map[string]any{
 							"option": "publish",
 							"data": map[string]any{
-								"channel": "simulation/setting/tick",
+								"topic": "simulation/setting/tick",
 								"data": map[string]any{
 									"tick":         tick_,
 									"vector_clock": vectorClockToMap(&vectorClock),
@@ -144,7 +144,7 @@ func RunCenter() {
 						msg, _ := sonic.Marshal(map[string]any{
 							"option": "publish",
 							"data": map[string]any{
-								"channel": "simulation/chat",
+								"topic": "simulation/chat",
 								"data": map[string]any{
 									"chat":         chatInput.Text,
 									"vector_clock": vectorClockToMap(&vectorClock),
@@ -210,7 +210,7 @@ func RunCenter() {
 				msg, _ := sonic.Marshal(map[string]any{
 					"option": "subscribe",
 					"data": map[string]any{
-						"channel": "simulation/join",
+						"topic": "simulation/join",
 						"data": map[string]any{
 							"vector_clock": vectorClockToMap(&vectorClock),
 						},
@@ -222,7 +222,7 @@ func RunCenter() {
 				msg, _ = sonic.Marshal(map[string]any{
 					"option": "subscribe",
 					"data": map[string]any{
-						"channel": "simulation/quit",
+						"topic": "simulation/quit",
 						"data": map[string]any{
 							"vector_clock": vectorClockToMap(&vectorClock),
 						},
@@ -234,7 +234,7 @@ func RunCenter() {
 				msg, _ = sonic.Marshal(map[string]any{
 					"option": "subscribe",
 					"data": map[string]any{
-						"channel": "simulation/chat",
+						"topic": "simulation/chat",
 						"data": map[string]any{
 							"vector_clock": vectorClockToMap(&vectorClock),
 						},
@@ -313,13 +313,13 @@ func handleMsgCenter() {
 			}
 
 			data, _ := sonic.Get(data_, "data")
-			channel, _ := data.Get("channel").String()
-			go handleEventCenter(channel, data)
+			topic, _ := data.Get("topic").String()
+			go handleEventCenter(topic, data)
 		}
 	}
 }
 
-func handleEventCenter(channel string, data ast.Node) {
+func handleEventCenter(topic string, data ast.Node) {
 	recVC, _ := data.Get("data").Get("vector_clock").MarshalJSON()
 	recVectorClock := make(map[string]uint64)
 	sonic.Unmarshal(recVC, &recVectorClock)
@@ -334,7 +334,7 @@ func handleEventCenter(channel string, data ast.Node) {
 		}
 	}
 
-	switch channel {
+	switch topic {
 	case "simulation/chat":
 		from_user, _ := data.Get("from_user").String()
 		chat, _ := data.Get("data").Get("chat").String()
@@ -348,7 +348,7 @@ func handleEventCenter(channel string, data ast.Node) {
 		msg, _ := sonic.Marshal(map[string]any{
 			"option": "subscribe",
 			"data": map[string]any{
-				"channel": "simulation/client/" + username,
+				"topic": "simulation/client/" + username,
 				"data": map[string]any{
 					"vector_clock": vectorClockToMap(&vectorClock),
 				},
@@ -359,7 +359,7 @@ func handleEventCenter(channel string, data ast.Node) {
 		msg, _ = sonic.Marshal(map[string]any{
 			"option": "publish",
 			"data": map[string]any{
-				"channel": "simulation/setting/tick",
+				"topic": "simulation/setting/tick",
 				"data": map[string]any{
 					"tick":         int64(tick),
 					"vector_clock": vectorClockToMap(&vectorClock),
@@ -377,7 +377,7 @@ func handleEventCenter(channel string, data ast.Node) {
 		msg, _ := sonic.Marshal(map[string]any{
 			"option": "unsubscribe",
 			"data": map[string]any{
-				"channel": "simulation/client/" + username,
+				"topic": "simulation/client/" + username,
 				"data": map[string]any{
 					"vector_clock": vectorClockToMap(&vectorClock),
 				},
@@ -389,7 +389,7 @@ func handleEventCenter(channel string, data ast.Node) {
 		msg, _ = sonic.Marshal(map[string]any{
 			"option": "publish",
 			"data": map[string]any{
-				"channel": "simulation/setting/remove_point",
+				"topic": "simulation/setting/remove_point",
 				"data": map[string]any{
 					"vector_clock": vectorClockToMap(&vectorClock),
 					"point":        username,
@@ -398,8 +398,8 @@ func handleEventCenter(channel string, data ast.Node) {
 		})
 		dstpConn.Send(msg, false)
 	default:
-		if match, err := regexp.MatchString(`^simulation/client/(.+)$`, channel); err == nil && match {
-			username := channel[len("simulation/client/"):]
+		if match, err := regexp.MatchString(`^simulation/client/(.+)$`, topic); err == nil && match {
+			username := topic[len("simulation/client/"):]
 			if _, ok := clientsSet.Load(username); ok {
 				point_x, _ := data.Get("data").Get("point").Get("x").Float64()
 				point_y, _ := data.Get("data").Get("point").Get("y").Float64()
@@ -431,7 +431,7 @@ func handleEventCenter(channel string, data ast.Node) {
 				msg, _ := sonic.Marshal(map[string]any{
 					"option": "publish",
 					"data": map[string]any{
-						"channel": "simulation/setting/point",
+						"topic": "simulation/setting/point",
 						"data": map[string]any{
 							"vector_clock": vectorClockToMap(&vectorClock),
 							"point":        point.(Point),
@@ -443,6 +443,6 @@ func handleEventCenter(channel string, data ast.Node) {
 			}
 			return
 		}
-		logger.Warn("unknown channel", zap.String("channel", channel))
+		logger.Warn("unknown topic", zap.String("topic", topic))
 	}
 }

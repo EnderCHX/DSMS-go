@@ -37,7 +37,7 @@ func InitLogger() {
 }
 
 type Hub struct {
-	subscribers map[string]map[*client]struct{} // 订阅者 key: channel, value: clients set
+	subscribers map[string]map[*client]struct{} // 订阅者 key: topic, value: clients set
 	mtx         sync.Mutex
 	server      *server
 }
@@ -332,61 +332,61 @@ func (h *Hub) handleMsg(msg Msg, c *client) {
 			return
 		}
 		type Data struct {
-			Channel string `json:"channel"`
+			Topic string `json:"topic"`
 		}
 		var data Data
 		json.Unmarshal(msg.Data, &data)
-		if data.Channel == "" {
+		if data.Topic == "" {
 			return
 		}
 		h.mtx.Lock()
 		defer h.mtx.Unlock()
-		if _, ok := h.subscribers[data.Channel]; !ok {
-			h.subscribers[data.Channel] = make(map[*client]struct{})
+		if _, ok := h.subscribers[data.Topic]; !ok {
+			h.subscribers[data.Topic] = make(map[*client]struct{})
 		}
-		h.subscribers[data.Channel][c] = struct{}{}
+		h.subscribers[data.Topic][c] = struct{}{}
 	case "unsubscribe":
 		if !c.login {
 			return
 		}
 		type Data struct {
-			Channel string `json:"channel"`
+			Topic string `json:"topic"`
 		}
 		var data Data
 		json.Unmarshal(msg.Data, &data)
 
-		if data.Channel == "" {
+		if data.Topic == "" {
 			return
 		}
 		h.mtx.Lock()
 		defer h.mtx.Unlock()
-		if _, ok := h.subscribers[data.Channel]; !ok {
+		if _, ok := h.subscribers[data.Topic]; !ok {
 			return
 		}
-		delete(h.subscribers[data.Channel], c)
+		delete(h.subscribers[data.Topic], c)
 	case "publish":
 		if !c.login {
 			return
 		}
 		type Data struct {
-			Channel  string          `json:"channel"`
+			Topic    string          `json:"topic"`
 			Data     json.RawMessage `json:"data"`
 			FromUser string          `json:"from_user"`
 		}
 		var data Data
 		json.Unmarshal(msg.Data, &data)
-		if data.Channel == "" {
+		if data.Topic == "" {
 			return
 		}
 		data.FromUser = c.username
 		data_, _ := json.Marshal(data)
 		msg.Data = data_
 		msg_, _ := json.Marshal(msg)
-		for client := range h.subscribers[data.Channel] {
+		for client := range h.subscribers[data.Topic] {
 			if client.closed {
 				logger.Debug(fmt.Sprintf("%v -> client closed", client.conn.RemoteAddr()))
 				client.mtx.Lock()
-				delete(h.subscribers[data.Channel], client)
+				delete(h.subscribers[data.Topic], client)
 				client.mtx.Unlock()
 				continue
 			}

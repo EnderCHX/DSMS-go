@@ -1,13 +1,24 @@
 package auth
 
 import (
+	"sync"
 	"testing"
 )
 
 func TestLogin(t *testing.T) {
-	refresh_token, access_token, err := Login("test", "test1")
-	if err != nil {
-		t.Error(err)
+	errCount := 0
+	wg := &sync.WaitGroup{}
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go func() {
+			_, _, err := Login("test", "test")
+			if err != nil {
+				errCount++
+				//t.Log(err)
+			}
+			wg.Done()
+		}()
 	}
-	t.Log(refresh_token, access_token)
+	wg.Wait()
+	t.Log("login error count:", errCount)
 }

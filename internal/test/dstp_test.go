@@ -59,7 +59,7 @@ func TestDSTPPing(t *testing.T) {
 }
 
 func TestDSTPDelay(t *testing.T) {
-	conn, err := net.Dial("tcp", "192.168.86.11:8888")
+	conn, err := net.Dial("tcp", "192.168.7.104:8888")
 	if err != nil {
 		t.Error(err.Error())
 	}

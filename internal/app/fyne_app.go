@@ -68,7 +68,7 @@ func Run() {
 					Option: "publish",
 					Data: func() json.RawMessage {
 						data, _ := json.Marshal(map[string]string{
-							"event": inputPublish.Text,
+							"topic": inputPublish.Text,
 							"data":  inputMsg.Text,
 						})
 						return data
@@ -85,7 +85,7 @@ func Run() {
 					Option: "subscribe",
 					Data: func() json.RawMessage {
 						data, _ := json.Marshal(map[string]string{
-							"event": inputSubscribe.Text,
+							"topic": inputSubscribe.Text,
 						})
 						return data
 					}(),

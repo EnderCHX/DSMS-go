@@ -75,7 +75,7 @@ func write() {
 	for {
 		msg := <-send
 		logger.Debug(string(msg))
-		err := client.Send(msg, false)
+		err := client.Send(msg, true)
 		if err != nil {
 			logger.Error("Write error: " + err.Error())
 			return

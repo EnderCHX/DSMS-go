@@ -49,8 +49,14 @@ func (c *Conn) sendData(data []byte, needAck bool, waitAck bool, ackMessageId ui
 	}
 
 	needSegment := false
+	segment := 1
 
-	segment := len(data)/((1<<17)-1) + 1
+	if len(data)/((1<<16)-1) != 0 {
+		segment = len(data) / ((1 << 16) - 1)
+		if len(data)%((1<<16)-1) != 0 {
+			segment++
+		}
+	}
 
 	if segment > 1 {
 		needSegment = true
@@ -104,46 +110,62 @@ func (c *Conn) sendData(data []byte, needAck bool, waitAck bool, ackMessageId ui
 		}
 
 		_, err = (*c.conn).Write([]byte{dataEnd})
-		return err
-	}
-
-	for i := 0; i < segment; i++ {
-		dataLen := ((1 << 17) - 1)
-		dataLenBuf := make([]byte, 2)
-		binary.BigEndian.PutUint16(dataLenBuf, uint16(dataLen))
-		_, err = (*c.conn).Write(dataLenBuf)
 		if err != nil {
 			return err
 		}
-		_, err = (*c.conn).Write(data[i*((1<<17)-1) : (i+1)*((1<<17)-1)])
-		if err != nil {
-			return err
-		}
-
-		if i == segment-1 {
-			if needAck && !waitAck {
-				go func() {
-					for i := 0; i < 3; i++ {
-						time.Sleep(10 * time.Second)
-						if _, ok := c.ackMap.Load(messageId); ok {
-							c.ackMap.Delete(messageId)
-							break
-						} else {
-							c.sendData(data, true, true, messageId)
-						}
-					}
-				}()
+	} else {
+		for i := 0; i < segment; i++ {
+			if i == segment-1 {
+				dataLen := len(data) - i*((1<<16)-1)
+				dataLenBuf := make([]byte, 2)
+				binary.BigEndian.PutUint16(dataLenBuf, uint16(dataLen))
+				_, err = (*c.conn).Write(dataLenBuf)
+				_, err = (*c.conn).Write(data[i*((1<<16)-1) : i*((1<<16)-1)+dataLen])
+				if err != nil {
+					return err
+				}
+			} else {
+				dataLen := ((1 << 16) - 1)
+				dataLenBuf := make([]byte, 2)
+				binary.BigEndian.PutUint16(dataLenBuf, uint16(dataLen))
+				_, err = (*c.conn).Write(dataLenBuf)
+				if err != nil {
+					return err
+				}
+				_, err = (*c.conn).Write(data[i*((1<<16)-1) : (i+1)*((1<<16)-1)])
+				if err != nil {
+					return err
+				}
 			}
-			_, err = (*c.conn).Write([]byte{dataEnd})
-			return err
-		} else {
-			_, err = (*c.conn).Write([]byte{dataContinue})
-			if err != nil {
-				return err
+
+			if i == segment-1 {
+				_, err = (*c.conn).Write([]byte{dataEnd})
+				if err != nil {
+					return err
+				}
+			} else {
+				_, err = (*c.conn).Write([]byte{dataContinue})
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
-	return fmt.Errorf("invalid data start")
+
+	if needAck && !waitAck {
+		go func() {
+			for i := 0; i < 3; i++ {
+				time.Sleep(10 * time.Second)
+				if _, ok := c.ackMap.Load(messageId); ok {
+					c.ackMap.Delete(messageId)
+					break
+				} else {
+					c.sendData(data, true, true, messageId)
+				}
+			}
+		}()
+	}
+	return nil
 }
 
 func (c *Conn) sendAck(messageId uint32) error {
@@ -255,7 +277,7 @@ func (c *Conn) receiveData() ([]byte, int, error) {
 	}
 
 	messageIdBuf := make([]byte, 4)
-	if ctrlData&ctrlIfAck == 1 {
+	if ctrlData&ctrlIfAck == ctrlIfAck {
 		_, err = io.ReadFull((*c.conn), messageIdBuf)
 		if err != nil {
 			return nil, 4, err
@@ -267,13 +289,13 @@ func (c *Conn) receiveData() ([]byte, int, error) {
 		return messageIdBuf, 4, err
 	}
 
-	needAck := ctrlData&ctrlNeedAck == 1
+	needAck := ctrlData&ctrlNeedAck == ctrlNeedAck
 	_, err = io.ReadFull((*c.conn), messageIdBuf)
 	if err != nil {
 		return nil, 0, err
 	}
 	messageId := binary.BigEndian.Uint32(messageIdBuf)
-	needSegment := ctrlData&ctrlSeg == 1
+	needSegment := ctrlData&ctrlSeg == ctrlSeg
 
 	for {
 		if needSegment {

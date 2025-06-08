@@ -409,6 +409,7 @@ func (h *Hub) handleMsg(msg Msg, c *client) {
 					Option: "error",
 					Data:   json.RawMessage(`{"error":"access token is empty"}`),
 				})
+				logger.Debug(fmt.Sprintf("%v -> : %v", c.conn.RemoteAddr(), "登录失败"))
 				return msg_
 			}()
 			return
@@ -443,6 +444,7 @@ func (h *Hub) handleMsg(msg Msg, c *client) {
 							Option: "info",
 							Data:   json.RawMessage(`{"info":"login success"}`),
 						})
+						logger.Debug(fmt.Sprintf("%v -> : %v", c.conn.RemoteAddr(), "登录成功"))
 						return msg_
 					}()
 					return

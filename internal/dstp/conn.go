@@ -359,6 +359,12 @@ func (c *Conn) Pong() error {
 	return c.sendPong()
 }
 
+// 接收数据包 return 数据
+// 数据类型int
+// 1 普通消息
+// 2 ping包
+// 3 pong包
+// 4 ack应答
 func (c *Conn) Receive() (data []byte, type_ int, err error) {
 	data, type_, err = c.receiveData()
 	return

@@ -61,7 +61,7 @@ func TestSend(t *testing.T) {
 	}
 	wg.Wait()
 	t.Log("sent", 10000, "messages", "in", time.Since(start))
-	time.Sleep(time.Second)
+	time.Sleep(time.Second * 20)
 	dstpConn.Close()
 }
 
@@ -89,7 +89,7 @@ func TestReceive(t *testing.T) {
 			})
 			count.Add(1)
 		}
-		t.Log(count.Load())
+		//t.Log(count.Load())
 		if count.Load() == 10000 {
 			t.Log("received", count.Load(), "messages", "in", time.Since(timeCount))
 			break
@@ -101,6 +101,12 @@ func TestReceive2(t *testing.T) {
 	t.Parallel()
 
 	wg := &sync.WaitGroup{}
+
+	wg.Add(1)
+	go func() {
+		TestReceive(t)
+		wg.Done()
+	}()
 
 	wg.Add(1)
 	go func() {

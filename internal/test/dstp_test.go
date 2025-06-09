@@ -8,7 +8,7 @@ import (
 )
 
 func TestDSTPs(t *testing.T) {
-	listener, err := net.Listen("tcp", ":8888")
+	listener, err := net.Listen("tcp", "0.0.0.0:20252")
 	if err != nil {
 		t.Error(err.Error())
 	}
@@ -21,27 +21,42 @@ func TestDSTPs(t *testing.T) {
 	if err != nil {
 		t.Error(err.Error())
 	}
+	t.Log(data)
 	t.Log(string(data))
-	dstpConn.Send(data, true)
+	err = dstpConn.Send(data, true)
+	if err != nil {
+		t.Error(err.Error())
+	}
+	time.Sleep(1 * time.Second)
 	dstpConn.Close()
 }
 
 func TestDSTPc(t *testing.T) {
-	conn, err := net.Dial("tcp", "127.0.0.1:8888")
+	conn, err := net.Dial("tcp", "127.0.0.1:20252")
 	if err != nil {
 		t.Error(err.Error())
 	}
 	dstpConn := dstp.NewConn(&conn)
-	dstpConn.Send([]byte("hello"), true)
-	data, _, err := dstpConn.Receive()
+	err = dstpConn.Send([]byte("hello"), true)
 	if err != nil {
 		t.Error(err.Error())
 	}
-	t.Log(string(data))
+	for {
+		data, type_, err := dstpConn.Receive()
+		if err != nil {
+			t.Error(err.Error())
+		}
+		if type_ != 1 {
+			continue
+		}
+		t.Log(data)
+		t.Log(string(data))
+		break
+	}
 }
 
 func TestDSTPPing(t *testing.T) {
-	listener, err := net.Listen("tcp", ":8888")
+	listener, err := net.Listen("tcp", "0.0.0.0:20256")
 	if err != nil {
 		t.Error(err.Error())
 	}
@@ -59,7 +74,7 @@ func TestDSTPPing(t *testing.T) {
 }
 
 func TestDSTPDelay(t *testing.T) {
-	conn, err := net.Dial("tcp", "192.168.7.104:8888")
+	conn, err := net.Dial("tcp", "127.0.0.1:20256")
 	if err != nil {
 		t.Error(err.Error())
 	}
